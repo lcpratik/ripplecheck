@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { scanDirectory } from "./scan.js";
 import { classifyImpact } from "./classify.js";
+import { generateMigration } from "./migration.js";
 
 const server = new McpServer({
   name: "ripplecheck-mcp-server",
@@ -104,6 +105,83 @@ server.registerTool(
             text: `scan_schema_impact failed: ${message}`,
           },
         ],
+        isError: true,
+      };
+    }
+  }
+);
+
+server.registerTool(
+  "generate_migration",
+  {
+    description:
+      "Generates up and down SQL migration statements for a single column change " +
+      "(rename or drop) on a PostgreSQL table. Always call scan_schema_impact first to " +
+      "discover which files reference the column; pass any trigger or PL/pgSQL function " +
+      "names found in that report as dependentFunctions so they are listed in the warning. " +
+      "Returns { up, down, warnings } — never writes files. " +
+      "Use for: producing the ALTER TABLE SQL before the user applies a schema change.",
+    inputSchema: z.object({
+      table: z.string().describe("Table name, e.g. 'sightings'."),
+      column: z.string().describe("Current column name, e.g. 'upvote_count'."),
+      changeType: z
+        .enum(["rename", "drop"])
+        .describe("'rename' to rename the column, 'drop' to remove it."),
+      newName: z
+        .string()
+        .optional()
+        .describe("New column name. Required when changeType is 'rename'."),
+      columnType: z
+        .string()
+        .optional()
+        .describe(
+          "SQL type for the DOWN migration (e.g. 'INTEGER NOT NULL DEFAULT 0'). " +
+            "Required when changeType is 'drop' to make the rollback runnable."
+        ),
+      dependentFunctions: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "Names of PL/pgSQL functions or trigger functions that reference the column, " +
+            "as found by scan_schema_impact. Listed in the migration warning."
+        ),
+    }),
+  },
+  async ({ table, column, changeType, newName, columnType, dependentFunctions }) => {
+    try {
+      const result = generateMigration({
+        table,
+        column,
+        changeType,
+        newName,
+        columnType,
+        dependentFunctions,
+      });
+
+      const lines: string[] = [
+        `## Migration: ${changeType.toUpperCase()} \`${table}.${column}\``,
+        ``,
+        `### UP`,
+        `\`\`\`sql`,
+        result.up,
+        `\`\`\``,
+        ``,
+        `### DOWN`,
+        `\`\`\`sql`,
+        result.down,
+        `\`\`\``,
+        ``,
+        `### Warnings`,
+      ];
+      for (const w of result.warnings) {
+        lines.push(`- ${w}`);
+      }
+
+      return { content: [{ type: "text", text: lines.join("\n") }] };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: "text", text: `generate_migration failed: ${message}` }],
         isError: true,
       };
     }
