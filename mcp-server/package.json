@@ -1,0 +1,18 @@
+{
+  "name": "ripplecheck-mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server exposing scan_schema_impact tool for RippleCheck",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}
